@@ -412,4 +412,4 @@ setInterval(async () => {
   } catch (err) {
     console.error("❌ Self-ping failed:", err.message);
   }
-}, 3 * 60 * 1000); // every 3 minutes
+}, 1 * 60 * 1000); // every 3 minutes
