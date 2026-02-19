@@ -403,13 +403,30 @@ Recommend anime if relevant.
 
 // -------------------- START LOG --------------------
 console.log("Kiroflix bot is running...");
-const SELF_URL = process.env.SELF_URL || `http://localhost:${PORT}`;
+const SELF_URL = "https://libby.onrender.com/";
 
-setInterval(async () => {
+async function selfPing() {
   try {
-    await fetch(SELF_URL);
-    console.log("✅ Self-ping sent to keep the bot awake");
+    const res = await fetch(SELF_URL);
+    const text = await res.text();
+
+    if (text.includes("Kiroflix bot is alive! 🌟")) {
+      console.log(
+        `✅ Self-ping OK | status: ${res.status} | message verified`
+      );
+    } else {
+      console.warn(
+        `⚠️ Self-ping responded but message mismatch | status: ${res.status}`
+      );
+    }
+
   } catch (err) {
     console.error("❌ Self-ping failed:", err.message);
   }
-}, 1 * 60 * 1000); // every 3 minutes
+}
+
+/* run every 1 minute */
+setInterval(selfPing, 60 * 1000);
+
+/* optional immediate run */
+selfPing();
