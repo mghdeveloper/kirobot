@@ -176,8 +176,12 @@ async function sendModernReply(chatId, text, images = []) {
 }
 
 // -------------------- GEMINI CALL --------------------
-async function askAI(userMessage, sessionSummary = "", extraInstruction = "") {
+async function askAI(userMessage, sessionSummary = "", extraInstruction = "", recentMessages = []) {
   try {
+
+    const historyText = recentMessages
+      .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`)
+      .join("\n");
 
     const prompt = `
 ${MASTER_PROMPT}
@@ -186,6 +190,9 @@ ${extraInstruction}
 
 Conversation summary:
 ${sessionSummary}
+
+Recent conversation:
+${historyText}
 
 User message:
 ${userMessage}
@@ -214,7 +221,6 @@ Reply now.
     return "Kiroflix AI is busy 🍿";
   }
 }
-
 // -------------------- SESSION SUMMARY --------------------
 async function summarizeSession(session) {
 
@@ -362,12 +368,13 @@ Use these search results to answer accurately.
 Do not invent facts.
 `;
 
-  reply = await askAI(
-    text + "\n\nSearch results:\n" + formatted,
-    summary,
-    instruction
-  );
-
+  const recentMessages = session.messages.slice(-6);
+    reply = await askAI(
+  text + "\n\nSearch results:\n" + formatted,
+  summary,
+  instruction,
+  recentMessages
+);
   // ✅ extract images
   const imageUrls = results
     .filter(r => r.image)
@@ -383,7 +390,8 @@ Answer clearly and helpfully.
 Recommend anime if relevant.
 `;
 
-    reply = await askAI(text, summary, instruction);
+    const recentMessages = session.messages.slice(-6);
+    reply = await askAI(text, summary, instruction, recentMessages);
 
   }
 
