@@ -368,7 +368,7 @@ Use these search results to answer accurately.
 Do not invent facts.
 `;
 
-  const recentMessages = session.messages.slice(-6);
+  const recentMessages = session.messages.slice(-1);
     reply = await askAI(
   text + "\n\nSearch results:\n" + formatted,
   summary,
@@ -390,7 +390,7 @@ Answer clearly and helpfully.
 Recommend anime if relevant.
 `;
 
-    const recentMessages = session.messages.slice(-6);
+    const recentMessages = session.messages.slice(-1);
     reply = await askAI(text, summary, instruction, recentMessages);
 
   }
