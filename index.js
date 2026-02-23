@@ -7,81 +7,25 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Simple endpoint to respond to pings
+// ------------------- EXPRESS SERVER -------------------
 app.get("/", (req, res) => {
   res.send("Kiroflix bot is alive! 🌟");
 });
 
-// Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// -------------------- CONFIG --------------------
-const TOKEN = "8216107970:AAFsGWwTwEJ12iDdyPE4fq_xg1fqlATUKbo";
+// ------------------- CONFIG -------------------
+const TOKEN = "8274005274:AAHxEIeeB8458a5JNxj4SNMMUIhATJnYoGo";
 const GEMINI_KEY = "AIzaSyDbxbqyVw4gqu3tJgHsuzuDKTy39imouC0";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent";
-const SERPAPI_KEY = "80ac13f5265d00b05317a58cdde9223caa2c64a45e60e460c1c435a2a9b7aa96";
 
-// -------------------- CACHE FILES --------------------
-const SEARCH_CACHE_FILE = path.join(__dirname, "searchCache.json");
+// ------------------- SESSION CACHE -------------------
 const SESSION_CACHE_FILE = path.join(__dirname, "userSessions.json");
-
-let searchCache = fs.existsSync(SEARCH_CACHE_FILE)
-  ? JSON.parse(fs.readFileSync(SEARCH_CACHE_FILE, "utf-8"))
-  : {};
-
 let sessions = fs.existsSync(SESSION_CACHE_FILE)
   ? JSON.parse(fs.readFileSync(SESSION_CACHE_FILE, "utf-8"))
   : {};
-
-// -------------------- TELEGRAM BOT --------------------
-const bot = new TelegramBot(TOKEN, { polling: true });
-
-// -------------------- MASTER SYSTEM PROMPT --------------------
-const MASTER_PROMPT = `
-You are Kiroflix, a friendly, human-like multilingual anime assistant.
-
-LANGUAGE MEMORY RULE (STRICT):
-- Detect the language of the FIRST meaningful user message in the conversation.
-- Store it as the conversation language.
-- ALWAYS reply ONLY in that stored language.
-- NEVER switch language automatically, even if the user writes in another language later.
-- ONLY change language if the user EXPLICITLY asks (examples: "reply in English", "تكلم بالعربية", "parle en français").
-
-CONSISTENCY:
-- If the conversation language is already known, ignore the language of the new message and respond in the stored language.
-
-HUMAN STYLE RULES:
-- Sound natural, friendly, and conversational.
-- Use emojis appropriately (not too many).
-- Be enthusiastic about anime.
-- Avoid robotic tone.
-
-SUGGESTION RULE (VERY IMPORTANT):
-- ALWAYS finish your reply with a suggestion for the next topic based on context.
-
-FORMATTING RULES:
-- Use HTML formatting for Telegram.
-- Bullet points with: •
-- <b>Bold</b> for anime titles
-- Clean spacing
-
-IMAGE RULE:
-- If image URLs are provided, mention them naturally.
-
-IDENTITY:
-- Passionate anime expert.
-- Helpful, modern, engaging.
-
-Always follow these rules strictly.
-`;
-
-
-// -------------------- HELPERS --------------------
-function saveSearchCache() {
-  fs.writeFileSync(SEARCH_CACHE_FILE, JSON.stringify(searchCache, null, 2));
-}
 
 function saveSessionCache() {
   fs.writeFileSync(SESSION_CACHE_FILE, JSON.stringify(sessions, null, 2));
@@ -89,88 +33,49 @@ function saveSessionCache() {
 
 function initSession(chatId) {
   if (!sessions[chatId]) {
-    sessions[chatId] = {
-      messages: [],
-      lastMessageId: null,
-      summary: "",
-    };
+    sessions[chatId] = { lastMessageId: null };
   }
 }
 
-// -------------------- PROGRESS MESSAGE --------------------
+// ------------------- TELEGRAM BOT -------------------
+const bot = new TelegramBot(TOKEN, { polling: true });
+
+// ------------------- HELPERS -------------------
 async function updateProgress(chatId, text) {
-
   initSession(chatId);
-
   const session = sessions[chatId];
 
   try {
-
     if (session.lastMessageId) {
-
       await bot.editMessageText(text, {
-
         chat_id: chatId,
         message_id: session.lastMessageId,
-        parse_mode: "HTML"
-
+        parse_mode: "HTML",
       });
-
     } else {
-
       const msg = await bot.sendMessage(chatId, text, {
-        parse_mode: "HTML"
+        parse_mode: "HTML",
       });
-
       session.lastMessageId = msg.message_id;
-
       saveSessionCache();
-
     }
-
   } catch {
-
     const msg = await bot.sendMessage(chatId, text, {
-      parse_mode: "HTML"
+      parse_mode: "HTML",
     });
-
     session.lastMessageId = msg.message_id;
-
     saveSessionCache();
-
   }
 }
 
-async function sendModernReply(chatId, text, images = []) {
-
-  if (images.length > 0) {
-
-    await bot.sendPhoto(chatId, images[0], {
-      caption: text,
-      parse_mode: "HTML"
-    });
-
-  } else {
-
-    await bot.sendMessage(chatId, text, {
-      parse_mode: "HTML"
-    });
-
-  }
-
-}
-
-// -------------------- GEMINI CALL --------------------
+// ------------------- GEMINI CALL -------------------
 async function askAI(userMessage, sessionSummary = "", extraInstruction = "", recentMessages = []) {
   try {
-
     const historyText = recentMessages
-      .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`)
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`)
       .join("\n");
 
     const prompt = `
-${MASTER_PROMPT}
-
 ${extraInstruction}
 
 Conversation summary:
@@ -190,236 +95,153 @@ Reply now.
       {
         contents: [
           {
-            parts: [{ text: prompt }]
-          }
-        ]
+            parts: [{ text: prompt }],
+          },
+        ],
       }
     );
 
-    return (
-      res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      "Kiroflix is thinking..."
-    );
-
+    return res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Thinking...";
   } catch (err) {
     console.error("Gemini error:", err.message);
-    return "Kiroflix AI is busy 🍿";
-  }
-}
-// -------------------- SESSION SUMMARY --------------------
-async function summarizeSession(session) {
-
-  if (session.messages.length < 4) return session.summary;
-
-  const lastMessages = session.messages.slice(-10);
-
-  const summaryInstruction = `
-Summarize this conversation in 2 short sentences.
-Keep key anime topics and preferences.
-Reply STRICTLY in the conversation's stored language.
-Do NOT change language.
-`;
-
-  const summary = await askAI(
-    JSON.stringify(lastMessages),
-    "",
-    summaryInstruction
-  );
-
-  session.summary = summary;
-  saveSessionCache();
-
-  return summary;
-}
-
-// -------------------- SEARCH --------------------
-async function searchAnime(query) {
-
-  const now = Date.now();
-
-  if (
-    searchCache[query] &&
-    now - searchCache[query].timestamp < 86400000
-  ) {
-    return searchCache[query].results;
-  }
-
-  try {
-
-    const res = await axios.get(
-      "https://serpapi.com/search.json",
-      {
-        params: {
-          engine: "google",
-          q: query,
-          api_key: SERPAPI_KEY,
-          num: 5,
-        },
-      }
-    );
-
-    const results = (res.data.organic_results || [])
-      .slice(0, 5)
-      .map(r => ({
-        title: r.title,
-        snippet: r.snippet,
-        link: r.link,
-        image: r.thumbnail || null
-      }));
-
-    searchCache[query] = {
-      timestamp: now,
-      results
-    };
-
-    saveSearchCache();
-
-    return results;
-
-  } catch (err) {
-    console.error(err.message);
-    return [];
+    return null;
   }
 }
 
-// -------------------- DECIDE SEARCH --------------------
-async function shouldSearch(text, summary) {
-
+// ------------------- CLEAN ANIME NAME -------------------
+async function extractAnimeName(userMessage) {
   const instruction = `
-Decide if this needs real-time info like release dates, news, schedules.
-
-Reply ONLY:
-SEARCH
-or
-DIRECT
+Extract ONLY the anime title from this message.
+Remove words like watch, episode, ep, please, I want, etc.
+Reply ONLY with the title.
 `;
-
-  const decision = await askAI(text, summary, instruction);
-
-  return decision.includes("SEARCH");
+  const name = await askAI(userMessage, "", instruction);
+  return name ? name.replace(/"/g, "").trim() : null;
 }
 
-// -------------------- BOT LOGIC --------------------
-bot.on("message", async (msg) => {
+// ------------------- CHOOSE BEST MATCH -------------------
+async function chooseBestAnime(userMessage, results) {
+  const instruction = `
+User request:
+${userMessage}
 
+Anime list:
+${JSON.stringify(results)}
+
+Choose the BEST matching anime.
+Reply ONLY with the anime ID.
+`;
+  const id = await askAI(userMessage, "", instruction);
+  return id ? id.replace(/\D/g, "") : null;
+}
+
+// ------------------- EXTRACT EPISODE NUMBER -------------------
+function extractEpisodeNumber(text) {
+  const match =
+    text.match(/episode\s*(\d+)/i) ||
+    text.match(/\bep\s*(\d+)/i) ||
+    text.match(/\b(\d+)\b/);
+  return match ? match[1] : null;
+}
+
+// ------------------- SEARCH KIROFLIX ANIME -------------------
+async function searchKiroflixAnime(title) {
+  try {
+    const res = await axios.get(
+      "https://creators.kiroflix.site/backend/anime_search.php",
+      { params: { q: title } }
+    );
+    if (!res.data.success || !res.data.results.length) return null;
+    return res.data.results;
+  } catch {
+    return null;
+  }
+}
+
+// ------------------- FETCH EPISODES -------------------
+async function fetchEpisodes(animeId) {
+  try {
+    const res = await axios.get(
+      "https://creators.kiroflix.site/backend/episodes_proxy.php",
+      { params: { id: animeId } }
+    );
+    if (!res.data.success) return null;
+    return res.data.episodes;
+  } catch {
+    return null;
+  }
+}
+
+// ------------------- GENERATE STREAM LINK -------------------
+async function generateStreamLink(episodeId) {
+  try {
+    const url = `https://kiroflix.cu.ma/generate/generate_episode.php?episode_id=${episodeId}`;
+    let attempts = 0;
+    while (attempts < 15) {
+      const res = await axios.get(url);
+      if (res.data.success && res.data.master) {
+        return {
+          stream: `https://kiroflix.cu.ma/${res.data.master}`,
+          subtitle: `https://kiroflix.cu.ma/${res.data.subtitle}`,
+        };
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+      attempts++;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ------------------- BOT LOGIC -------------------
+bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim();
-
   if (!text) return;
 
-  initSession(chatId);
+  await updateProgress(chatId, "🔍 Processing your request...");
 
-  const session = sessions[chatId];
-
-  if (text === "/start") {
-
-    const welcome = await askAI(
-      "Welcome the user briefly.",
-      "",
-      "Welcome the user to Kiroflix anime assistant."
-    );
-
-    const m = await bot.sendMessage(chatId, welcome, {
-  parse_mode: "HTML"
-});
-
-
-    session.lastMessageId = m.message_id;
-
-    saveSessionCache();
-
-    return;
-  }
-
-  await updateProgress(chatId, "🍥 Thinking...");
-
-  const summary = session.summary || "";
-
-  const needSearch = await shouldSearch(text, summary);
-
-  let reply = "";
-
-  if (needSearch) {
-
-  await updateProgress(chatId, "🔍 Searching...");
-
-  const results = await searchAnime(text);
-
-  const formatted = results.map(r =>
-    `${r.title}\n${r.snippet}`
-  ).join("\n\n");
-
-  const instruction = `
-Use these search results to answer accurately.
-Do not invent facts.
-`;
-
-  const recentMessages = session.messages.slice(-1);
-    reply = await askAI(
-  text + "\n\nSearch results:\n" + formatted,
-  summary,
-  instruction,
-  recentMessages
-);
-  // ✅ extract images
-  const imageUrls = results
-    .filter(r => r.image)
-    .map(r => r.image);
-
-  // ✅ send modern reply with image
-  await sendModernReply(chatId, reply, imageUrls);
-
-} else {
-
-    const instruction = `
-Answer clearly and helpfully.
-Recommend anime if relevant.
-`;
-
-    const recentMessages = session.messages.slice(-1);
-    reply = await askAI(text, summary, instruction, recentMessages);
-
-  }
-
-  session.messages.push({ role: "user", text });
-  session.messages.push({ role: "bot", text: reply });
-
-  saveSessionCache();
-
-  await updateProgress(chatId, reply);
-
-  await summarizeSession(session);
-
-  session.lastMessageId = null;
-
-});
-
-// -------------------- START LOG --------------------
-console.log("Kiroflix bot is running...");
-const SELF_URL = "https://libby.onrender.com/";
-
-async function selfPing() {
   try {
-    const res = await fetch(SELF_URL);
-    const text = await res.text();
+    // 1️⃣ Extract anime name
+    const animeTitle = await extractAnimeName(text);
+    if (!animeTitle) return updateProgress(chatId, "❌ Anime not detected");
 
-    if (text.includes("Kiroflix bot is alive! 🌟")) {
-      console.log(
-        `✅ Self-ping OK | status: ${res.status} | message verified`
-      );
-    } else {
-      console.warn(
-        `⚠️ Self-ping responded but message mismatch | status: ${res.status}`
-      );
-    }
+    // 2️⃣ Search anime
+    await updateProgress(chatId, "🔎 Searching anime...");
+    const results = await searchKiroflixAnime(animeTitle);
+    if (!results) return updateProgress(chatId, "❌ Anime not found");
 
+    // 3️⃣ Choose best match
+    const animeId = await chooseBestAnime(text, results);
+    if (!animeId) return updateProgress(chatId, "❌ Anime match failed");
+
+    // 4️⃣ Extract episode number
+    const episodeNumber = extractEpisodeNumber(text);
+    if (!episodeNumber) return updateProgress(chatId, "❌ Episode number missing");
+
+    // 5️⃣ Fetch episodes
+    await updateProgress(chatId, "📺 Fetching episode...");
+    const episodes = await fetchEpisodes(animeId);
+    if (!episodes) return updateProgress(chatId, "❌ Episodes not found");
+
+    const episode = episodes.find((e) => e.number == episodeNumber);
+    if (!episode) return updateProgress(chatId, "❌ Episode not found");
+
+    // 6️⃣ Generate stream link
+    await updateProgress(chatId, "⏳ Generating stream link...");
+    const stream = await generateStreamLink(episode.id);
+    if (!stream) return updateProgress(chatId, "❌ Stream generation failed");
+
+    // 7️⃣ Send final stream URL
+    await bot.sendMessage(chatId, `🎬 Stream ready:\n${stream.stream}`, {
+      parse_mode: "HTML",
+    });
   } catch (err) {
-    console.error("❌ Self-ping failed:", err.message);
+    console.log(err.message);
+    updateProgress(chatId, "❌ Error occurred");
   }
-}
+});
 
-/* run every 1 minute */
-setInterval(selfPing, 60 * 1000);
-
-/* optional immediate run */
-selfPing();
+// ------------------- START LOG -------------------
+console.log("Kiroflix bot is running...");
