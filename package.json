@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "scripts": {
+  "start": "apt-get update && apt-get install -y ffmpeg && node index.js"
+}
     "dev": "nodemon index.js"
   },
   "keywords": [],
