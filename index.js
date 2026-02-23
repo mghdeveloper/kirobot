@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
 
-// ------------------- EXPRESS KEEP ALIVE -------------------
+// ================= EXPRESS KEEP ALIVE =================
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -17,7 +17,7 @@ app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
 
-// ------------------- CONFIG -------------------
+// ================= CONFIG =================
 const TOKEN = "8216107970:AAFsGWwTwEJ12iDdyPE4fq_xg1fqlATUKbo";
 const GEMINI_KEY = "AIzaSyDbxbqyVw4gqu3tJgHsuzuDKTy39imouC0";
 
@@ -26,25 +26,30 @@ const GEMINI_URL =
 
 const bot = new TelegramBot(TOKEN, {
   polling: true,
-  filepath: false
+  filepath: false,
+  request: {
+    agentOptions: {
+      keepAlive: true,
+      family: 4
+    }
+  }
 });
 
-// ------------------- VIDEO DIR -------------------
+// ================= VIDEO DIR =================
 const VIDEO_DIR = path.join(__dirname, "videos");
 
 if (!fs.existsSync(VIDEO_DIR))
   fs.mkdirSync(VIDEO_DIR);
 
-// ------------------- TELEGRAM OPTIMIZED PROGRESS -------------------
+// ================= PROGRESS =================
 async function updateProgress(chatId, text) {
   try {
     await bot.sendMessage(chatId, text);
   } catch {}
 }
 
-// ------------------- GEMINI -------------------
+// ================= AI =================
 async function askAI(message, instruction) {
-
   try {
 
     const prompt = `
@@ -59,13 +64,9 @@ Reply ONLY result.
     const res = await axios.post(
       `${GEMINI_URL}?key=${GEMINI_KEY}`,
       {
-        contents: [
-          { parts: [{ text: prompt }] }
-        ]
+        contents: [{ parts: [{ text: prompt }] }]
       },
-      {
-        timeout: 20000
-      }
+      { timeout: 20000 }
     );
 
     return res.data
@@ -75,45 +76,40 @@ Reply ONLY result.
       ?.trim();
 
   } catch {
-
     return null;
-
   }
-
 }
 
-// ------------------- EXTRACT ANIME NAME -------------------
+// ================= EXTRACT ANIME =================
 async function extractAnimeName(text) {
-
   return await askAI(
     text,
-    "Extract ONLY anime title."
+    "Extract ONLY anime title. No extra words."
+  );
+}
+
+// ================= CHOOSE ANIME =================
+async function chooseAnime(text, results) {
+  const id = await askAI(
+    text + JSON.stringify(results),
+    "Reply ONLY anime ID number."
   );
 
+  return id?.replace(/\D/g, "");
 }
 
-// ------------------- CHOOSE BEST ANIME -------------------
-async function chooseAnime(text, results) {
-
-  return (
-    await askAI(
-      text + JSON.stringify(results),
-      "Reply ONLY anime ID."
-    )
-  )?.replace(/\D/g, "");
-
-}
-
-// ------------------- EXTRACT EPISODE NUMBER -------------------
+// ================= EXTRACT EP =================
 function extractEpisode(text) {
+  const match =
+    text.match(/episode\s*(\d+)/i) ||
+    text.match(/ep\s*(\d+)/i) ||
+    text.match(/\b(\d+)\b/);
 
-  return text.match(/\d+/)?.[0];
-
+  return match?.[1];
 }
 
-// ------------------- SEARCH ANIME -------------------
+// ================= SEARCH =================
 async function searchAnime(title) {
-
   try {
 
     const res = await axios.get(
@@ -129,16 +125,12 @@ async function searchAnime(title) {
       : null;
 
   } catch {
-
     return null;
-
   }
-
 }
 
-// ------------------- FETCH EPISODES -------------------
+// ================= FETCH EPISODES =================
 async function fetchEpisodes(id) {
-
   try {
 
     const res = await axios.get(
@@ -154,14 +146,11 @@ async function fetchEpisodes(id) {
       : null;
 
   } catch {
-
     return null;
-
   }
-
 }
 
-// ------------------- GENERATE STREAM -------------------
+// ================= GENERATE STREAM =================
 async function generateStream(episodeId) {
 
   const url =
@@ -171,46 +160,62 @@ async function generateStream(episodeId) {
 
     try {
 
-      const res = await axios.get(url);
+      const res = await axios.get(url, { timeout: 15000 });
 
-      if (res.data.success)
+      if (res.data.success && res.data.master)
         return `https://kiroflix.cu.ma/generate/${res.data.master}`;
 
     } catch {}
 
     await new Promise(r => setTimeout(r, 2000));
-
   }
 
   return null;
-
 }
 
-// ------------------- GET 360p -------------------
+// ================= GET 360p (WITH FALLBACK) =================
 async function get360p(masterUrl) {
 
-  const res = await axios.get(masterUrl);
+  try {
 
-  const lines = res.data.split("\n");
+    const res = await axios.get(masterUrl, { timeout: 20000 });
 
-  for (let i = 0; i < lines.length; i++) {
+    const lines = res.data.split("\n");
 
-    if (lines[i].includes("RESOLUTION=640x360")) {
+    let fallback = null;
 
-      return new URL(
-        lines[i + 1],
-        masterUrl
-      ).href;
+    for (let i = 0; i < lines.length; i++) {
+
+      if (lines[i].includes("RESOLUTION=")) {
+
+        const match =
+          lines[i].match(/RESOLUTION=\d+x(\d+)/);
+
+        if (!match) continue;
+
+        const height = parseInt(match[1]);
+
+        const url =
+          new URL(lines[i + 1], masterUrl).href;
+
+        if (height === 360)
+          return url;
+
+        if (height < 480 && !fallback)
+          fallback = url;
+
+      }
 
     }
 
+    return fallback;
+
+  } catch {
+    return null;
   }
-
-  return null;
-
 }
 
-// ------------------- CONVERT TO MP4 -------------------
+// ================= CONVERT =================
 function convertToMP4(input, output) {
 
   return new Promise((resolve, reject) => {
@@ -218,35 +223,44 @@ function convertToMP4(input, output) {
     const cmd =
       `ffmpeg -y -loglevel error -i "${input}" -c copy -bsf:a aac_adtstoasc "${output}"`;
 
-    exec(cmd, err =>
-      err ? reject(err) : resolve()
-    );
+    exec(cmd, err => {
+
+      if (err)
+        reject(err);
+      else
+        resolve();
+
+    });
 
   });
-
 }
 
-// ------------------- SEND VIDEO -------------------
+// ================= SEND VIDEO =================
 async function sendVideo(chatId, file, episodeId) {
 
   await bot.sendVideo(chatId, file, {
+
     caption:
 `✅ 360p ready
 
-🌐 Watch other qualities:
+🌐 Watch all qualities:
 https://kiroflix.cu.ma/generate/player/?episode_id=${episodeId}`,
+
     supports_streaming: true
+
   });
 
 }
 
-// ------------------- BOT MAIN -------------------
+// ================= MAIN =================
 bot.on("message", async msg => {
 
   const chatId = msg.chat.id;
   const text = msg.text;
 
   if (!text) return;
+
+  let filePath = null;
 
   try {
 
@@ -256,7 +270,7 @@ bot.on("message", async msg => {
       await extractAnimeName(text);
 
     if (!animeName)
-      return updateProgress(chatId, "❌ Anime not found");
+      return updateProgress(chatId, "❌ Anime not detected");
 
     await updateProgress(chatId, "🔎 Searching anime...");
 
@@ -264,7 +278,7 @@ bot.on("message", async msg => {
       await searchAnime(animeName);
 
     if (!results)
-      return updateProgress(chatId, "❌ No results");
+      return updateProgress(chatId, "❌ Anime not found");
 
     const animeId =
       await chooseAnime(text, results);
@@ -284,8 +298,8 @@ bot.on("message", async msg => {
       await fetchEpisodes(animeId);
 
     const episode =
-      episodes.find(
-        e => e.number == epNumber
+      episodes?.find(e =>
+        e.number == epNumber
       );
 
     if (!episode)
@@ -305,24 +319,34 @@ bot.on("message", async msg => {
       await get360p(master);
 
     if (!m3u8)
-      return updateProgress(chatId, "❌ 360p not found");
+      return updateProgress(chatId, "❌ 360p not available");
 
-    const file =
-      `${VIDEO_DIR}/${episode.id}_360.mp4`;
+    filePath =
+      path.join(
+        VIDEO_DIR,
+        `${episode.id}_360.mp4`
+      );
 
     await updateProgress(chatId, "📦 Converting...");
 
-    await convertToMP4(m3u8, file);
+    await convertToMP4(m3u8, filePath);
 
     await updateProgress(chatId, "📤 Uploading...");
 
-    await sendVideo(chatId, file, episode.id);
+    await sendVideo(chatId, filePath, episode.id);
 
-    fs.unlinkSync(file);
+  }
+  catch (err) {
 
-  } catch {
+    console.log(err);
 
-    updateProgress(chatId, "❌ Error");
+    updateProgress(chatId, "❌ Error occurred");
+
+  }
+  finally {
+
+    if (filePath && fs.existsSync(filePath))
+      fs.unlinkSync(filePath);
 
   }
 
