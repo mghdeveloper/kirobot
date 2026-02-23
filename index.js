@@ -3,362 +3,192 @@ const axios = require("axios");
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
 
 // ================= EXPRESS KEEP ALIVE =================
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => {
-  res.send("Kiroflix episode bot running 🌟");
-});
-
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+app.get("/", (req, res) => res.send("Kiroflix Episode Bot Alive 🌟"));
+app.listen(PORT, () => console.log("Server running on port", PORT));
 
 // ================= CONFIG =================
 const TOKEN = "8216107970:AAFsGWwTwEJ12iDdyPE4fq_xg1fqlATUKbo";
 const GEMINI_KEY = "AIzaSyDbxbqyVw4gqu3tJgHsuzuDKTy39imouC0";
-
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent";
-
-const bot = new TelegramBot(TOKEN, {
-  polling: true,
-  filepath: false,
-  request: {
-    agentOptions: {
-      keepAlive: true,
-      family: 4
-    }
-  }
-});
-
-// ================= VIDEO DIR =================
-const VIDEO_DIR = path.join(__dirname, "videos");
-
-if (!fs.existsSync(VIDEO_DIR))
-  fs.mkdirSync(VIDEO_DIR);
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent";
+const bot = new TelegramBot(TOKEN, { polling: true });
 
 // ================= PROGRESS =================
+const progressCache = {};
 async function updateProgress(chatId, text) {
   try {
-    await bot.sendMessage(chatId, text);
-  } catch {}
+    if (progressCache[chatId]) {
+      await bot.editMessageText(text, { chat_id: chatId, message_id: progressCache[chatId] });
+    } else {
+      const msg = await bot.sendMessage(chatId, text);
+      progressCache[chatId] = msg.message_id;
+    }
+  } catch (err) {}
 }
 
-// ================= AI =================
+// ================= GEMINI AI =================
 async function askAI(message, instruction) {
   try {
-
-    const prompt = `
-${instruction}
-
-User message:
-${message}
-
-Reply ONLY result.
-`;
-
-    const res = await axios.post(
-      `${GEMINI_URL}?key=${GEMINI_KEY}`,
-      {
-        contents: [{ parts: [{ text: prompt }] }]
-      },
-      { timeout: 20000 }
-    );
-
-    return res.data
-      ?.candidates?.[0]
-      ?.content?.parts?.[0]
-      ?.text
-      ?.trim();
-
+    const prompt = `${instruction}\nUser message:\n${message}\nReply ONLY result.`;
+    const res = await axios.post(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
+      contents: [{ parts: [{ text: prompt }] }]
+    }, { timeout: 20000 });
+    return res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch {
     return null;
   }
 }
 
-// ================= EXTRACT ANIME =================
+// ================= EXTRACT ANIME INFO =================
 async function extractAnimeName(text) {
-  return await askAI(
-    text,
-    "Extract ONLY anime title. No extra words."
-  );
+  return await askAI(text, "Extract ONLY anime title. Remove words like watch, ep, episode, please.");
 }
-
-// ================= CHOOSE ANIME =================
+async function extractEpisodeNumber(text) {
+  return (await askAI(text, "Extract ONLY the episode number from this message."))?.match(/\d+/)?.[0];
+}
 async function chooseAnime(text, results) {
-  const id = await askAI(
-    text + JSON.stringify(results),
-    "Reply ONLY anime ID number."
-  );
-
+  const id = await askAI(text + JSON.stringify(results), "Choose the BEST matching anime ID. Reply ONLY with the number.");
   return id?.replace(/\D/g, "");
 }
 
-// ================= EXTRACT EP =================
-function extractEpisode(text) {
-  const match =
-    text.match(/episode\s*(\d+)/i) ||
-    text.match(/ep\s*(\d+)/i) ||
-    text.match(/\b(\d+)\b/);
-
-  return match?.[1];
-}
-
-// ================= SEARCH =================
+// ================= SEARCH ANIME =================
 async function searchAnime(title) {
   try {
-
-    const res = await axios.get(
-      "https://creators.kiroflix.site/backend/anime_search.php",
-      {
-        params: { q: title },
-        timeout: 20000
-      }
-    );
-
-    return res.data.success
-      ? res.data.results
-      : null;
-
-  } catch {
-    return null;
-  }
+    const res = await axios.get("https://creators.kiroflix.site/backend/anime_search.php", { params: { q: title }, timeout: 20000 });
+    return res.data.success ? res.data.results : null;
+  } catch { return null; }
 }
 
 // ================= FETCH EPISODES =================
-async function fetchEpisodes(id) {
+async function fetchEpisodes(animeId) {
   try {
-
-    const res = await axios.get(
-      "https://creators.kiroflix.site/backend/episodes_proxy.php",
-      {
-        params: { id },
-        timeout: 20000
-      }
-    );
-
-    return res.data.success
-      ? res.data.episodes
-      : null;
-
-  } catch {
-    return null;
-  }
+    const res = await axios.get("https://creators.kiroflix.site/backend/episodes_proxy.php", { params: { id: animeId }, timeout: 20000 });
+    return res.data.success ? res.data.episodes : null;
+  } catch { return null; }
 }
 
-// ================= GENERATE STREAM =================
+// ================= STREAM GENERATION =================
 async function generateStream(episodeId) {
-
-  const url =
-    `https://kiroflix.cu.ma/generate/generate_episode.php?episode_id=${episodeId}`;
-
+  const url = `https://kiroflix.cu.ma/generate/generate_episode.php?episode_id=${episodeId}`;
   for (let i = 0; i < 15; i++) {
-
     try {
-
       const res = await axios.get(url, { timeout: 15000 });
-
-      if (res.data.success && res.data.master)
-        return `https://kiroflix.cu.ma/generate/${res.data.master}`;
-
+      if (res.data.success && res.data.master) return `https://kiroflix.cu.ma/generate/${res.data.master}`;
     } catch {}
-
     await new Promise(r => setTimeout(r, 2000));
   }
-
   return null;
 }
 
-// ================= GET 360p (WITH FALLBACK) =================
+// ================= GET 360P =================
 async function get360p(masterUrl) {
-
   try {
-
     const res = await axios.get(masterUrl, { timeout: 20000 });
-
     const lines = res.data.split("\n");
-
-    let fallback = null;
-
     for (let i = 0; i < lines.length; i++) {
-
-      if (lines[i].includes("RESOLUTION=")) {
-
-        const match =
-          lines[i].match(/RESOLUTION=\d+x(\d+)/);
-
-        if (!match) continue;
-
-        const height = parseInt(match[1]);
-
-        const url =
-          new URL(lines[i + 1], masterUrl).href;
-
-        if (height === 360)
-          return url;
-
-        if (height < 480 && !fallback)
-          fallback = url;
-
-      }
-
+      if (lines[i].includes("RESOLUTION=640x360")) return new URL(lines[i+1], masterUrl).href;
     }
-
-    return fallback;
-
-  } catch {
     return null;
-  }
+  } catch { return null; }
 }
 
-// ================= CONVERT =================
-function convertToMP4(input, output) {
-
-  return new Promise((resolve, reject) => {
-
-    const cmd = `ffmpeg \
--y \
--loglevel error \
--protocol_whitelist file,http,https,tcp,tls,crypto \
--allowed_extensions ALL \
--i "${input}" \
--c copy \
--bsf:a aac_adtstoasc \
-"${output}"`;
-
-    exec(cmd, (err) => {
-
-      if (err) {
-        console.log("FFMPEG ERROR:", err.message);
-        reject(err);
-      } else {
-        resolve();
-      }
-
-    });
-
-  });
-
-}
-// ================= SEND VIDEO =================
-async function sendVideo(chatId, file, episodeId) {
-
-  await bot.sendVideo(chatId, file, {
-
-    caption:
-`✅ 360p ready
-
-🌐 Watch all qualities:
-https://kiroflix.cu.ma/generate/player/?episode_id=${episodeId}`,
-
-    supports_streaming: true
-
-  });
-
+// ================= SUBTITLE HANDLING =================
+async function checkSubtitles(episodeId) {
+  try {
+    const res = await axios.get(`https://kiroflix.cu.ma/generate/getsubs.php?episode_id=${episodeId}`);
+    return res.data || [];
+  } catch { return []; }
 }
 
-// ================= MAIN =================
+// ================= MAIN BOT =================
+const pendingSubs = {};
+
 bot.on("message", async msg => {
-
   const chatId = msg.chat.id;
-  const text = msg.text;
-
+  const text = msg.text?.trim();
   if (!text) return;
 
-  let filePath = null;
-
   try {
-
     await updateProgress(chatId, "🍥 Thinking...");
 
-    const animeName =
-      await extractAnimeName(text);
-
-    if (!animeName)
-      return updateProgress(chatId, "❌ Anime not detected");
+    // 1️⃣ Extract anime and episode
+    const animeName = await extractAnimeName(text);
+    if (!animeName) return updateProgress(chatId, "❌ Anime not detected");
+    let epNumber = await extractEpisodeNumber(text);
 
     await updateProgress(chatId, "🔎 Searching anime...");
+    const results = await searchAnime(animeName);
+    if (!results) return updateProgress(chatId, "❌ Anime not found");
 
-    const results =
-      await searchAnime(animeName);
-
-    if (!results)
-      return updateProgress(chatId, "❌ Anime not found");
-
-    const animeId =
-      await chooseAnime(text, results);
-
-    if (!animeId)
-      return updateProgress(chatId, "❌ Match failed");
-
-    const epNumber =
-      extractEpisode(text);
-
-    if (!epNumber)
-      return updateProgress(chatId, "❌ Episode missing");
+    const animeId = await chooseAnime(text, results);
+    if (!animeId) return updateProgress(chatId, "❌ Match failed");
 
     await updateProgress(chatId, "📺 Fetching episode...");
+    const episodes = await fetchEpisodes(animeId);
+    const episode = episodes?.find(e => e.number == epNumber);
+    if (!episode) return updateProgress(chatId, "❌ Episode not found");
 
-    const episodes =
-      await fetchEpisodes(animeId);
+    // 2️⃣ Subtitle selection
+    const subs = await checkSubtitles(episode.id);
+    let subtitleLang = text.match(/\b(arabic|english|japanese)\b/i)?.[0];
+    if (!subtitleLang) {
+      pendingSubs[chatId] = { episode, animeId, results };
+      return updateProgress(chatId, "📝 Please specify subtitle language (English, Arabic, Japanese) or reply 'No Subtitle'");
+    }
 
-    const episode =
-      episodes?.find(e =>
-        e.number == epNumber
-      );
+    // 3️⃣ Generate stream
+    await updateProgress(chatId, `⏳ Generating 360p stream with ${subtitleLang || 'no'} subtitle...`);
+    const master = await generateStream(episode.id);
+    if (!master) return updateProgress(chatId, "❌ Stream generation failed");
 
-    if (!episode)
-      return updateProgress(chatId, "❌ Episode not found");
+    const m3u8 = await get360p(master);
+    if (!m3u8) return updateProgress(chatId, "❌ 360p not available");
 
-    await updateProgress(chatId, "⏳ Generating stream...");
+    // 4️⃣ Send final embed
+    const embedLink = `https://kiroflix.cu.ma/generate/player/?episode_id=${episode.id}`;
+    const caption = `
+🎬 <b>${episode.title}</b>
+🖼 <a href="${episode.poster}">Anime Image</a>
+🌐 Watch 360p & other qualities: ${embedLink}
+💬 Subtitle: ${subtitleLang || 'None'}
+`;
 
-    const master =
-      await generateStream(episode.id);
+    await bot.sendMessage(chatId, caption, { parse_mode: "HTML", disable_web_page_preview: false });
 
-    if (!master)
-      return updateProgress(chatId, "❌ Stream failed");
+    delete pendingSubs[chatId];
 
-    await updateProgress(chatId, "⚙️ Preparing 360p...");
-
-    const m3u8 =
-      await get360p(master);
-
-    if (!m3u8)
-      return updateProgress(chatId, "❌ 360p not available");
-
-    filePath =
-      path.join(
-        VIDEO_DIR,
-        `${episode.id}_360.mp4`
-      );
-
-    await updateProgress(chatId, "📦 Converting...");
-
-    await convertToMP4(m3u8, filePath);
-
-    await updateProgress(chatId, "📤 Uploading...");
-
-    await sendVideo(chatId, filePath, episode.id);
-
-  }
-  catch (err) {
-
+  } catch (err) {
     console.log(err);
-
     updateProgress(chatId, "❌ Error occurred");
-
   }
-  finally {
-
-    if (filePath && fs.existsSync(filePath))
-      fs.unlinkSync(filePath);
-
-  }
-
 });
 
-console.log("Kiroflix bot ready ✅");
+// ================= HANDLE SUBTITLE REPLY =================
+bot.on("message", async msg => {
+  const chatId = msg.chat.id;
+  const pending = pendingSubs[chatId];
+  if (!pending) return;
+
+  const text = msg.text.trim().toLowerCase();
+  if (["english","arabic","japanese","no subtitle"].includes(text)) {
+    const subtitleLang = text === "no subtitle" ? null : text;
+    pendingSubs[chatId].subtitleLang = subtitleLang;
+
+    // Resend the stream now with subtitle info
+    const { episode } = pendingSubs[chatId];
+    const embedLink = `https://kiroflix.cu.ma/generate/player/?episode_id=${episode.id}`;
+    const caption = `
+🎬 <b>${episode.title}</b>
+🖼 <a href="${episode.poster}">Anime Image</a>
+🌐 Watch 360p & other qualities: ${embedLink}
+💬 Subtitle: ${subtitleLang || 'None'}
+`;
+    await bot.sendMessage(chatId, caption, { parse_mode: "HTML", disable_web_page_preview: false });
+    delete pendingSubs[chatId];
+  }
+});
+
+console.log("Kiroflix Episode Bot Ready ✅");
