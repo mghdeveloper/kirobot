@@ -220,21 +220,30 @@ function convertToMP4(input, output) {
 
   return new Promise((resolve, reject) => {
 
-    const cmd =
-      `ffmpeg -y -loglevel error -i "${input}" -c copy -bsf:a aac_adtstoasc "${output}"`;
+    const cmd = `ffmpeg \
+-y \
+-loglevel error \
+-protocol_whitelist file,http,https,tcp,tls,crypto \
+-allowed_extensions ALL \
+-i "${input}" \
+-c copy \
+-bsf:a aac_adtstoasc \
+"${output}"`;
 
-    exec(cmd, err => {
+    exec(cmd, (err) => {
 
-      if (err)
+      if (err) {
+        console.log("FFMPEG ERROR:", err.message);
         reject(err);
-      else
+      } else {
         resolve();
+      }
 
     });
 
   });
-}
 
+}
 // ================= SEND VIDEO =================
 async function sendVideo(chatId, file, episodeId) {
 
