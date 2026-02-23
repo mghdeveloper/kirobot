@@ -18,7 +18,7 @@ app.listen(PORT, () => {
 });
 
 // ------------------- CONFIG -------------------
-const TOKEN = "8274005274:AAHxEIeeB8458a5JNxj4SNMMUIhATJnYoGo";
+const TOKEN = "8216107970:AAFsGWwTwEJ12iDdyPE4fq_xg1fqlATUKbo";
 const GEMINI_KEY = "AIzaSyDbxbqyVw4gqu3tJgHsuzuDKTy39imouC0";
 
 const GEMINI_URL =
