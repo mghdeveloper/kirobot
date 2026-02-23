@@ -1,12 +1,11 @@
 {
   "name": "kirobot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Kiroflix optimized Telegram episode bot",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
-    "scripts": {
-  "start": "apt-get update && apt-get install -y ffmpeg && node index.js"
-}
+    "start": "node index.js",
     "dev": "nodemon index.js"
   },
   "keywords": [],
@@ -14,9 +13,11 @@
   "license": "ISC",
   "dependencies": {
     "axios": "^1.13.5",
-    "express": "^5.2.1",
-    "franc": "^6.2.0",
+    "express": "^4.19.2",
     "node-fetch": "^3.3.2",
-    "node-telegram-bot-api": "^0.63.0"
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
   }
 }
