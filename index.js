@@ -168,6 +168,28 @@ async function getEpisodes(id) {
   }
 }
 
+// -------------------- STREAM GENERATOR --------------------
+async function generateStream(episodeId) {
+  try {
+    const { data } = await axios.get(
+      "https://kiroflix.cu.ma/generate/generate_episode.php",
+      { params: { episode_id: episodeId } }
+    );
+
+    if (!data?.success) return null;
+
+    return {
+      player: `https://kiroflix.cu.ma/generate/player/?episode_id=${episodeId}`,
+      master: data.master,
+      subtitle: data.subtitle
+    };
+
+  } catch (err) {
+    console.error("❌ Stream generation error:", err.message);
+    return null;
+  }
+}
+
 // -------------------- BOT --------------------
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
@@ -202,37 +224,45 @@ bot.on("message", async (msg) => {
       return;
     }
 
-    const episode = episodes.find(
-      e => Number(e.number) === Number(intent.episode)
-    );
+    const episode =
+      episodes.find(e => Number(e.number) === Number(intent.episode)) ||
+      episodes[0];
 
     if (!episode) {
       await bot.sendMessage(chatId, "❌ Episode not found");
       return;
     }
 
-    // 5️⃣ reply
+    // 5️⃣ generate stream
+    const stream = await generateStream(episode.id);
+    if (!stream) {
+      await bot.sendMessage(chatId, "❌ Could not generate stream");
+      return;
+    }
+
+    // 6️⃣ stylish reply
     const caption = `
 🎬 <b>${anime.title}</b>
 📺 Episode ${episode.number}: ${episode.title}
 🆔 <code>${episode.id}</code>
+▶️ <a href="${stream.player}">Watch Now</a>
 `;
-
-    logStep("FINAL RESPONSE", {
-      anime: anime.title,
-      episode: episode.number
-    });
 
     if (anime.poster) {
       await bot.sendPhoto(chatId, anime.poster, {
         caption,
-        parse_mode: "HTML"
+        parse_mode: "HTML",
+        disable_notification: false,
       });
     } else {
-      await bot.sendMessage(chatId, caption, {
-        parse_mode: "HTML"
-      });
+      await bot.sendMessage(chatId, caption, { parse_mode: "HTML" });
     }
+
+    logStep("REPLY SENT", {
+      anime: anime.title,
+      episode: episode.number,
+      player: stream.player
+    });
 
   } catch (err) {
     logError("MAIN BOT HANDLER", err);
