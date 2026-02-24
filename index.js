@@ -326,31 +326,28 @@ const path = require("path");
 
 const CACHE_FILE = path.join(__dirname, "latest_cache.json");
 const CACHE_DURATION = 3 * 60 * 60 * 1000; // 3 hours
+
 bot.onText(/\/latest/, async (msg) => {
   const chatId = msg.chat.id;
 
   try {
-    // ✅ Check cache
+    // ✅ Check cache first
     if (fs.existsSync(CACHE_FILE)) {
       const cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
 
       if (Date.now() - cache.updatedAt < CACHE_DURATION) {
-        // Send cached message
+        // Send cached stylish message
         await bot.sendMessage(chatId, cache.message, {
           parse_mode: "HTML",
           disable_web_page_preview: true,
         });
-
-        // Send JSON file
-        await bot.sendDocument(chatId, CACHE_FILE);
-
         return;
       }
     }
 
     await bot.sendMessage(chatId, "⏳ Updating latest episodes...");
 
-    // ✅ Fetch latest
+    // ✅ Fetch latest episodes
     const { data } = await axios.get("https://creators.kiroflix.site/backend/lastep.php");
     const latestEpisodes = data?.results || [];
 
@@ -379,28 +376,19 @@ bot.onText(/\/latest/, async (msg) => {
 `;
     });
 
-    // ✅ Save cache JSON
+    // ✅ Save cache
     const cacheData = {
       updatedAt: Date.now(),
       message,
-      episodes: latestEpisodes.map((ep, i) => ({
-        title: ep.anime_title,
-        episode: ep.latest_episode_number,
-        episodeTitle: ep.episode_title,
-        player: streams[i]?.player || null,
-      })),
     };
 
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cacheData, null, 2));
 
-    // ✅ Send message
+    // ✅ Send stylish message
     await bot.sendMessage(chatId, message, {
       parse_mode: "HTML",
       disable_web_page_preview: true,
     });
-
-    // ✅ Send JSON file
-    await bot.sendDocument(chatId, CACHE_FILE);
 
   } catch (err) {
     logError("LATEST COMMAND", err);
