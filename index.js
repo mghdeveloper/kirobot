@@ -106,7 +106,36 @@ async function searchAnime(title) {
     return [];
   }
 }
+async function chooseBestAnime(userQuery, results) {
 
+  const simplified = results.map(r => ({
+    id: r.id,
+    title: r.title,
+    info: r.info
+  }));
+
+  const prompt = `
+User is searching for: "${userQuery}"
+
+Choose the BEST matching anime from this list.
+
+Priorities:
+1️⃣ Main TV series over movies/ONA/specials
+2️⃣ Exact title match
+3️⃣ Highest episode count if multiple
+
+Return ONLY the id.
+
+List:
+${JSON.stringify(simplified, null, 2)}
+`;
+
+  const res = await askAI(prompt);
+
+  const idMatch = res.match(/\d+/);
+
+  return idMatch ? idMatch[0] : results[0].id;
+}
 // -------------------- AI PICK BEST ANIME --------------------
 async function chooseBestAnime(userText, results) {
   const list = results
@@ -171,7 +200,8 @@ bot.on("message", async (msg) => {
     }
 
     // 3️⃣ AI decides best match
-    const anime = await chooseBestAnime(text, results);
+    const bestId = await chooseBestAnime(userText, results);
+const anime = results.find(a => a.id === bestId) || results[0];
 
     // 4️⃣ get episodes
     const episodes = await getEpisodes(anime.id);
