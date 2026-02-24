@@ -214,7 +214,7 @@ async function generateSubtitle(chatId, episodeId, lang = "English") {
   const progressMsg = await bot.sendMessage(chatId, `🎯 Generating ${lang} subtitle... 0%`);
 
   try {
-    const { data: vttText } = await axios.get(`https://kiroflix.site/backend/vttreader.php`, {
+    const { data: vttText } = await axios.get(`https://creators.kiroflix.site/backend/vttreader.php`, {
       params: { episode_id: episodeId }
     });
     const lines = vttText.split(/\r?\n/);
