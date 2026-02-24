@@ -60,9 +60,10 @@ async function parseIntent(text) {
     logStep("USER MESSAGE", text);
 
     const prompt = `
-Extract anime title, season/part (if any), and episode.
+Extract anime title, season/part (if any), episode, 
+and if the user is requesting a subtitle (optional language).
 Return ONLY JSON:
-{"title":"anime title","season":"season info or null","episode":number}
+{"title":"anime title","season":"season info or null","episode":number,"subtitle":null,"subtitleLang":null}
 User: ${text}
 `;
 
@@ -75,19 +76,24 @@ User: ${text}
     logStep("PARSED INTENT", parsed);
 
     return parsed;
+
   } catch (err) {
     logError("INTENT PARSE", err);
 
-    // fallback regex
+    // fallback regex for episode & subtitle
     const ep = text.match(/ep(?:isode)?\s*(\d+)/i)?.[1];
     const season = text.match(/season\s*(\d+)/i)?.[1] || null;
     const title = text
       .replace(/ep(?:isode)?\s*\d+/i, "")
       .replace(/season\s*\d+/i, "")
+      .replace(/subtitle/i, "")
       .trim();
 
+    const subtitleMatch = text.match(/subtitle(?: in)?\s*([a-zA-Z]+)/i);
+    const subtitleLang = subtitleMatch ? subtitleMatch[1] : null;
+
     if (title && ep) {
-      const fallback = { title, season, episode: Number(ep) };
+      const fallback = { title, season, episode: Number(ep), subtitle: !!subtitleLang, subtitleLang };
       logStep("FALLBACK INTENT", fallback);
       return fallback;
     }
@@ -192,7 +198,83 @@ async function generateStream(episodeId) {
     return null;
   }
 }
+async function fetchAvailableSubtitles(episodeId) {
+  try {
+    const { data } = await axios.get(`https://kiroflix.cu.ma/generate/getsubs.php`, {
+      params: { episode_id: episodeId }
+    });
+    return data || [];
+  } catch (err) {
+    console.error("❌ Failed to fetch subtitles:", err.message);
+    return [];
+  }
+}
 
+async function generateSubtitle(chatId, episodeId, lang = "English") {
+  const progressMsg = await bot.sendMessage(chatId, `🎯 Generating ${lang} subtitle... 0%`);
+
+  try {
+    const { data: vttText } = await axios.get(`https://kiroflix.site/backend/vttreader.php`, {
+      params: { episode_id: episodeId }
+    });
+    const lines = vttText.split(/\r?\n/);
+
+    const chunkSize = 100;
+    const chunks = [];
+    for (let i = 0; i < lines.length; i += chunkSize) {
+      chunks.push([i, Math.min(i + chunkSize - 1, lines.length - 1)]);
+    }
+
+    const results = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const [start, end] = chunks[i];
+      const { data: translated } = await axios.post(`https://kiroflix.cu.ma/genrate/translate_chunk.php`, {
+        lang,
+        episode_id: episodeId,
+        start_line: start,
+        end_line: end
+      });
+      results.push(translated.trim());
+
+      // update progress
+      const percent = Math.floor(((i + 1) / chunks.length) * 100);
+      await bot.editMessageText(`🎯 Generating ${lang} subtitle... ${percent}%`, {
+        chat_id: chatId,
+        message_id: progressMsg.message_id
+      });
+    }
+
+    const finalSubtitle = results.join("\n");
+    const filename = `${lang.toLowerCase()}.vtt`;
+
+    await axios.post(`https://kiroflix.cu.ma/generate/save_subtitle.php`, {
+      episode_id: episodeId,
+      filename,
+      content: finalSubtitle
+    });
+
+    await axios.post(`https://creators.kiroflix.site/backend/store_subtitle.php`, {
+      episode_id: episodeId,
+      language: lang,
+      subtitle_url: `https://kiroflix.cu.ma/generate/episodes/${episodeId}/${filename}`
+    });
+
+    await bot.editMessageText(`✅ ${lang} subtitle ready!`, {
+      chat_id: chatId,
+      message_id: progressMsg.message_id
+    });
+
+    return `https://kiroflix.cu.ma/generate/episodes/${episodeId}/${filename}`;
+  } catch (err) {
+    console.error("❌ Subtitle generation failed:", err.message);
+    await bot.editMessageText(`❌ Failed to generate ${lang} subtitle`, {
+      chat_id: chatId,
+      message_id: progressMsg.message_id
+    });
+    return null;
+  }
+}
 // -------------------- BOT --------------------
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
@@ -266,6 +348,21 @@ const anime = await chooseBestAnime(intent, results);
       episode: episode.number,
       player: stream.player
     });
+    // Check if the user requested a subtitle
+if (intent.subtitle) {
+  const lang = intent.subtitleLang || "English";
+
+  // Check if subtitle already exists
+  const subs = await fetchAvailableSubtitles(episode.id);
+  const existing = subs.find(s => s.lang.toLowerCase() === lang.toLowerCase());
+
+  if (existing) {
+    await bot.sendMessage(chatId, `🎯 Subtitle already available: ${existing.lang} - ${existing.file}`);
+  } else {
+    // Generate subtitle if not found
+    await generateSubtitle(chatId, episode.id, lang);
+  }
+}
 
   } catch (err) {
     logError("MAIN BOT HANDLER", err);
