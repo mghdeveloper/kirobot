@@ -6,108 +6,164 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (_, res) => res.send("Kiroflix bot is alive 🌟"));
-app.listen(PORT, () => console.log("Server running on " + PORT));
+app.get("/", (_, res) => res.send("Kiroflix bot alive 🌟"));
+app.listen(PORT, () => console.log("[SERVER] Running on", PORT));
 
 // -------------------- CONFIG --------------------
-const TOKEN = "8216107970:AAFsGWwTwEJ12iDdyPE4fq_xg1fqlATUKbo";
-const GEMINI_KEY = "AIzaSyDbxbqyVw4gqu3tJgHsuzuDKTy39imouC0";
-
+const TOKEN = process.env.BOT_TOKEN;
+const GEMINI_KEY = process.env.GEMINI_KEY;
 
 const GEMINI_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent";
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
+// -------------------- LOGGER --------------------
+function logStep(step, data = "") {
+  console.log(`\n===== ${step} =====`);
+  if (data) console.log(data);
+}
+
+function logError(context, err) {
+  console.error(`\n❌ ERROR in ${context}`);
+  console.error("Message:", err.message);
+  console.error("Stack:", err.stack);
+  if (err.response?.data)
+    console.error("API Response:", err.response.data);
+}
+
 // -------------------- AI CORE --------------------
 async function askAI(prompt) {
   try {
+    logStep("AI REQUEST PROMPT", prompt);
+
     const { data } = await axios.post(
       `${GEMINI_URL}?key=${GEMINI_KEY}`,
       { contents: [{ parts: [{ text: prompt }] }] }
     );
 
-    return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    logStep("AI RESPONSE", text);
+    return text;
+
   } catch (err) {
-    console.error("AI error:", err.message);
+    logError("AI CALL", err);
     return "";
   }
 }
 
-// -------------------- PARSE INTENT --------------------
+// -------------------- INTENT --------------------
 async function parseIntent(text) {
-  const prompt = `
-Extract anime title and episode.
+  try {
+    logStep("USER MESSAGE", text);
 
+    const prompt = `
+Extract anime title and episode.
 Return ONLY JSON:
 {"title":"anime title","episode":number}
-
 User: ${text}
 `;
 
-  try {
     let res = await askAI(prompt);
     res = res.replace(/```json|```/gi, "").trim();
 
     const json = res.match(/\{[\s\S]*\}/)?.[0];
-    return json ? JSON.parse(json) : null;
-  } catch {
+
+    if (!json) throw new Error("No JSON from AI");
+
+    const parsed = JSON.parse(json);
+    logStep("PARSED INTENT", parsed);
+
+    return parsed;
+
+  } catch (err) {
+    logError("INTENT PARSE", err);
+
+    // fallback regex
     const ep = text.match(/ep(?:isode)?\s*(\d+)/i)?.[1];
     const title = text.replace(/ep(?:isode)?\s*\d+/i, "").trim();
-    return title && ep ? { title, episode: Number(ep) } : null;
+
+    if (title && ep) {
+      const fallback = { title, episode: Number(ep) };
+      logStep("FALLBACK INTENT", fallback);
+      return fallback;
+    }
+
+    return null;
   }
 }
 
 // -------------------- SEARCH --------------------
 async function searchAnime(title) {
   try {
+    logStep("SEARCH TITLE", title);
+
     const { data } = await axios.get(
       "https://creators.kiroflix.site/backend/anime_search.php",
       { params: { q: title } }
     );
+
+    logStep("SEARCH RESULT COUNT", data.results?.length);
     return data.results || [];
-  } catch {
+
+  } catch (err) {
+    logError("ANIME SEARCH", err);
     return [];
   }
 }
 
-// -------------------- AI BEST MATCH --------------------
-async function chooseBestAnime(userTitle, results) {
-  // 🔥 ONLY send minimal data to AI
-  const minimal = results.map(a => ({
-    id: a.id,
-    title: a.title
-  }));
+// -------------------- AI MATCH --------------------
+async function chooseBestAnime(title, results) {
+  try {
+    const minimal = results.map(a => ({
+      id: a.id,
+      title: a.title
+    }));
 
-  const prompt = `
-User is searching for "${userTitle}"
+    logStep("AI MATCH INPUT", minimal);
 
-Choose the BEST matching anime.
-
-Rules:
-- Prefer exact title
-- Prefer main series over movies
-- Return ONLY the id
-
-List:
+    const prompt = `
+User searching: "${title}"
+Return ONLY the id of best match.
 ${JSON.stringify(minimal)}
 `;
 
-  const res = await askAI(prompt);
-  const id = res.match(/\d+/)?.[0];
+    const res = await askAI(prompt);
+    const id = res.match(/\d+/)?.[0];
 
-  return results.find(a => a.id === id) || results[0];
+    if (!id) {
+      logStep("AI MATCH FALLBACK", "Using first result");
+      return results[0];
+    }
+
+    const anime = results.find(a => a.id === id);
+    logStep("AI MATCH RESULT", anime);
+
+    return anime || results[0];
+
+  } catch (err) {
+    logError("AI MATCH", err);
+    return results[0];
+  }
 }
 
 // -------------------- EPISODES --------------------
 async function getEpisodes(id) {
   try {
+    logStep("FETCH EPISODES FOR", id);
+
     const { data } = await axios.get(
       "https://creators.kiroflix.site/backend/episodes_proxy.php",
       { params: { id } }
     );
+
+    logStep("EPISODES COUNT", data.episodes?.length);
     return data.episodes || [];
-  } catch {
+
+  } catch (err) {
+    logError("EPISODES FETCH", err);
     return [];
   }
 }
@@ -119,29 +175,41 @@ bot.on("message", async (msg) => {
   if (!text) return;
 
   try {
+    logStep("NEW REQUEST", text);
     await bot.sendMessage(chatId, "🍿 Finding your episode...");
 
     // 1️⃣ intent
     const intent = await parseIntent(text);
-    if (!intent)
-      return bot.sendMessage(chatId, "❌ Could not understand request");
+    if (!intent) {
+      await bot.sendMessage(chatId, "❌ Could not understand request");
+      return;
+    }
 
     // 2️⃣ search
     const results = await searchAnime(intent.title);
-    if (!results.length)
-      return bot.sendMessage(chatId, "❌ Anime not found");
+    if (!results.length) {
+      await bot.sendMessage(chatId, "❌ Anime not found");
+      return;
+    }
 
-    // 3️⃣ best anime
+    // 3️⃣ match
     const anime = await chooseBestAnime(intent.title, results);
 
     // 4️⃣ episodes
     const episodes = await getEpisodes(anime.id);
+    if (!episodes.length) {
+      await bot.sendMessage(chatId, "❌ Episodes unavailable");
+      return;
+    }
+
     const episode = episodes.find(
       e => Number(e.number) === Number(intent.episode)
     );
 
-    if (!episode)
-      return bot.sendMessage(chatId, "❌ Episode not found");
+    if (!episode) {
+      await bot.sendMessage(chatId, "❌ Episode not found");
+      return;
+    }
 
     // 5️⃣ reply
     const caption = `
@@ -150,15 +218,26 @@ bot.on("message", async (msg) => {
 🆔 <code>${episode.id}</code>
 `;
 
-    await bot.sendPhoto(chatId, anime.poster, {
-      caption,
-      parse_mode: "HTML"
+    logStep("FINAL RESPONSE", {
+      anime: anime.title,
+      episode: episode.number
     });
 
+    if (anime.poster) {
+      await bot.sendPhoto(chatId, anime.poster, {
+        caption,
+        parse_mode: "HTML"
+      });
+    } else {
+      await bot.sendMessage(chatId, caption, {
+        parse_mode: "HTML"
+      });
+    }
+
   } catch (err) {
-    console.error(err);
-    bot.sendMessage(chatId, "⚠️ Error occurred");
+    logError("MAIN BOT HANDLER", err);
+    await bot.sendMessage(chatId, "⚠️ Something went wrong");
   }
 });
 
-console.log("🎬 Kiroflix bot running");
+console.log("🎬 Kiroflix Debug Bot Running");
