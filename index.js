@@ -218,7 +218,7 @@ bot.on("message", async (msg) => {
     }
 
     // 3️⃣ match
-    const anime = await chooseBestAnime(intent.title, results);
+const anime = await chooseBestAnime(intent, results);
 
     // 4️⃣ episodes
     const episodes = await getEpisodes(anime.id);
