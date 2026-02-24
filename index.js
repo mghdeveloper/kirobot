@@ -324,67 +324,83 @@ Optionally include a subtitle language if needed.
 const fs = require("fs");
 const path = require("path");
 
-const CACHE_FILE = path.join(__dirname, "latest.json");
-const CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours
-
+const CACHE_FILE = path.join(__dirname, "latest_cache.json");
+const CACHE_DURATION = 3 * 60 * 60 * 1000; // 3 hours
 bot.onText(/\/latest/, async (msg) => {
   const chatId = msg.chat.id;
 
   try {
-    // ---------- 1️⃣ Check cache ----------
+    // ✅ Check cache
     if (fs.existsSync(CACHE_FILE)) {
       const cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
 
-      const isValid = Date.now() - cache.timestamp < CACHE_TTL;
-
-      if (isValid) {
-        // ✅ Send cached file directly
-        await bot.sendDocument(chatId, CACHE_FILE, {
-          caption: "📦 Latest episodes (cached)"
+      if (Date.now() - cache.updatedAt < CACHE_DURATION) {
+        // Send cached message
+        await bot.sendMessage(chatId, cache.message, {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
         });
+
+        // Send JSON file
+        await bot.sendDocument(chatId, CACHE_FILE);
+
         return;
       }
     }
 
-    // ---------- 2️⃣ Fetch fresh data ----------
     await bot.sendMessage(chatId, "⏳ Updating latest episodes...");
 
-    const { data } = await axios.get(
-      "https://creators.kiroflix.site/backend/lastep.php"
-    );
-
+    // ✅ Fetch latest
+    const { data } = await axios.get("https://creators.kiroflix.site/backend/lastep.php");
     const latestEpisodes = data?.results || [];
+
     if (!latestEpisodes.length) {
       await bot.sendMessage(chatId, "⚠️ No latest episodes found.");
       return;
     }
 
-    // ---------- 3️⃣ Generate streams in parallel ----------
+    // ✅ Generate streams in parallel
     const streams = await Promise.all(
       latestEpisodes.map(ep => generateStream(ep.episode_id))
     );
 
-    const payload = latestEpisodes.map((ep, i) => ({
-      anime_title: ep.anime_title,
-      episode_number: ep.latest_episode_number,
-      episode_title: ep.episode_title,
-      episode_id: ep.episode_id,
-      player: streams[i]?.player || null
-    }));
+    // ✅ Build stylish message
+    let message = "🎬 <b>Latest Episodes</b>\n\n";
 
+    latestEpisodes.forEach((ep, i) => {
+      const stream = streams[i];
+      if (!stream) return;
+
+      message +=
+`🎬 <b>${ep.anime_title}</b>
+📺 Episode ${ep.latest_episode_number}: ${ep.episode_title}
+▶️ <a href="${stream.player}">Watch Now</a>
+
+`;
+    });
+
+    // ✅ Save cache JSON
     const cacheData = {
-      timestamp: Date.now(),
-      count: payload.length,
-      results: payload
+      updatedAt: Date.now(),
+      message,
+      episodes: latestEpisodes.map((ep, i) => ({
+        title: ep.anime_title,
+        episode: ep.latest_episode_number,
+        episodeTitle: ep.episode_title,
+        player: streams[i]?.player || null,
+      })),
     };
 
-    // ---------- 4️⃣ Save cache ----------
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cacheData, null, 2));
 
-    // ---------- 5️⃣ Send file ----------
-    await bot.sendDocument(chatId, CACHE_FILE, {
-      caption: "📦 Latest episodes (fresh)"
+    // ✅ Send message
+    await bot.sendMessage(chatId, message, {
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
     });
+
+    // ✅ Send JSON file
+    await bot.sendDocument(chatId, CACHE_FILE);
 
   } catch (err) {
     logError("LATEST COMMAND", err);
