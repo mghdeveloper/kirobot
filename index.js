@@ -41,26 +41,57 @@ async function askAI(prompt) {
 // -------------------- INTENT PARSER --------------------
 async function parseIntent(userText) {
   const prompt = `
-You are an anime request parser.
+Extract the anime request.
 
-Extract:
-1️⃣ anime title in ENGLISH
-2️⃣ episode number
+Return ONLY valid JSON.
+No markdown.
+No explanation.
 
-Return ONLY JSON:
-{"title":"...","episode":number}
+Format:
+{"title":"english anime title","episode":number}
 
 User: ${userText}
 `;
 
   try {
-    const res = await askAI(prompt);
-    return JSON.parse(res);
-  } catch {
-    return null;
+    let res = await askAI(prompt);
+
+    if (!res) throw new Error("Empty AI response");
+
+    console.log("AI RAW:", res);
+
+    // 🧹 remove markdown code blocks ```json ```
+    res = res.replace(/```json|```/gi, "").trim();
+
+    // 🧹 remove triple quotes """
+    res = res.replace(/"""/g, "").trim();
+
+    // 🧠 extract JSON object
+    const match = res.match(/\{[\s\S]*\}/);
+
+    if (match) {
+      return JSON.parse(match[0]);
+    }
+
+    throw new Error("No JSON found");
+
+  } catch (err) {
+    console.log("AI parse failed, using fallback…");
+
+    // 🔁 fallback regex
+    const epMatch = userText.match(/ep(?:isode)?\s*(\d+)/i);
+    const episode = epMatch ? Number(epMatch[1]) : null;
+
+    const title = userText
+      .replace(/ep(?:isode)?\s*\d+/i, "")
+      .replace(/season\s*\d+/i, "")
+      .trim();
+
+    if (!title || !episode) return null;
+
+    return { title, episode };
   }
 }
-
 // -------------------- SEARCH ANIME --------------------
 async function searchAnime(title) {
   try {
