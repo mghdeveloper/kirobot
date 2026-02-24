@@ -229,7 +229,7 @@ async function generateSubtitle(chatId, episodeId, lang = "English") {
 
     for (let i = 0; i < chunks.length; i++) {
       const [start, end] = chunks[i];
-      const { data: translated } = await axios.post(`https://kiroflix.cu.ma/genrate/translate_chunk.php`, {
+      const { data: translated } = await axios.post(`https://kiroflix.cu.ma/generate/translate_chunk.php`, {
         lang,
         episode_id: episodeId,
         start_line: start,
