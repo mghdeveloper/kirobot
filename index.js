@@ -60,33 +60,34 @@ async function parseIntent(text) {
     logStep("USER MESSAGE", text);
 
     const prompt = `
-Extract anime title and episode.
+Extract anime title, season/part (if any), and episode.
 Return ONLY JSON:
-{"title":"anime title","episode":number}
+{"title":"anime title","season":"season info or null","episode":number}
 User: ${text}
 `;
 
     let res = await askAI(prompt);
     res = res.replace(/```json|```/gi, "").trim();
-
     const json = res.match(/\{[\s\S]*\}/)?.[0];
-
     if (!json) throw new Error("No JSON from AI");
 
     const parsed = JSON.parse(json);
     logStep("PARSED INTENT", parsed);
 
     return parsed;
-
   } catch (err) {
     logError("INTENT PARSE", err);
 
     // fallback regex
     const ep = text.match(/ep(?:isode)?\s*(\d+)/i)?.[1];
-    const title = text.replace(/ep(?:isode)?\s*\d+/i, "").trim();
+    const season = text.match(/season\s*(\d+)/i)?.[1] || null;
+    const title = text
+      .replace(/ep(?:isode)?\s*\d+/i, "")
+      .replace(/season\s*\d+/i, "")
+      .trim();
 
     if (title && ep) {
-      const fallback = { title, episode: Number(ep) };
+      const fallback = { title, season, episode: Number(ep) };
       logStep("FALLBACK INTENT", fallback);
       return fallback;
     }
@@ -115,7 +116,7 @@ async function searchAnime(title) {
 }
 
 // -------------------- AI MATCH --------------------
-async function chooseBestAnime(title, results) {
+async function chooseBestAnime(intent, results) {
   try {
     const minimal = results.map(a => ({
       id: a.id,
@@ -125,8 +126,8 @@ async function chooseBestAnime(title, results) {
     logStep("AI MATCH INPUT", minimal);
 
     const prompt = `
-User searching: "${title}"
-Return ONLY the id of best match.
+User searching: "${intent.title}"${intent.season ? " season " + intent.season : ""}
+Return ONLY the id of the best match from this list:
 ${JSON.stringify(minimal)}
 `;
 
@@ -148,7 +149,6 @@ ${JSON.stringify(minimal)}
     return results[0];
   }
 }
-
 // -------------------- EPISODES --------------------
 async function getEpisodes(id) {
   try {
