@@ -120,9 +120,10 @@ User is searching for: "${userQuery}"
 Choose the BEST matching anime from this list.
 
 Priorities:
-1️⃣ Main TV series over movies/ONA/specials
-2️⃣ Exact title match
-3️⃣ Highest episode count if multiple
+1 Main TV series over movies/ONA/specials
+2 Exact title match
+3 Highest episode count if multiple
+4 respect name priority as if user search for Naruto you must return Naruto and not Road of Naruto
 
 Return ONLY the id.
 
