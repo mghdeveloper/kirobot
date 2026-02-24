@@ -173,7 +173,10 @@ async function generateStream(episodeId) {
   try {
     const { data } = await axios.get(
       "https://kiroflix.cu.ma/generate/generate_episode.php",
-      { params: { episode_id: episodeId } }
+      {
+        params: { episode_id: episodeId },
+        timeout: 40000 // 40 seconds
+      }
     );
 
     if (!data?.success) return null;
