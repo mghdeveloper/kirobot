@@ -214,37 +214,47 @@ async function generateSubtitle(chatId, episodeId, lang = "English") {
   const progressMsg = await bot.sendMessage(chatId, `🎯 Generating ${lang} subtitle... 0%`);
 
   try {
+    // 1️⃣ Fetch the base English VTT
     const { data: vttText } = await axios.get(`https://creators.kiroflix.site/backend/vttreader.php`, {
       params: { episode_id: episodeId }
     });
     const lines = vttText.split(/\r?\n/);
 
+    // 2️⃣ Split into chunks
     const chunkSize = 100;
     const chunks = [];
     for (let i = 0; i < lines.length; i += chunkSize) {
       chunks.push([i, Math.min(i + chunkSize - 1, lines.length - 1)]);
     }
 
-    const results = [];
+    const results = new Array(chunks.length);
+    let completedChunks = 0;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const [start, end] = chunks[i];
-      const { data: translated } = await axios.post(`https://kiroflix.cu.ma/generate/translate_chunk.php`, {
-        lang,
-        episode_id: episodeId,
-        start_line: start,
-        end_line: end
-      });
-      results.push(translated.trim());
+    // 3️⃣ Generate subtitle chunks in parallel
+    await Promise.all(chunks.map(async ([start, end], index) => {
+      try {
+        const { data: translated } = await axios.post(`https://kiroflix.cu.ma/generate/translate_chunk.php`, {
+          lang,
+          episode_id: episodeId,
+          start_line: start,
+          end_line: end
+        });
+        results[index] = translated.trim();
+      } catch (err) {
+        console.error(`❌ Chunk ${index} failed:`, err.message);
+        results[index] = ""; // leave empty if failed
+      }
 
-      // update progress
-      const percent = Math.floor(((i + 1) / chunks.length) * 100);
+      // Update progress for each completed chunk
+      completedChunks++;
+      const percent = Math.floor((completedChunks / chunks.length) * 100);
       await bot.editMessageText(`🎯 Generating ${lang} subtitle... ${percent}%`, {
         chat_id: chatId,
         message_id: progressMsg.message_id
       });
-    }
+    }));
 
+    // 4️⃣ Combine results and save
     const finalSubtitle = results.join("\n");
     const filename = `${lang.toLowerCase()}.vtt`;
 
@@ -266,6 +276,7 @@ async function generateSubtitle(chatId, episodeId, lang = "English") {
     });
 
     return `https://kiroflix.cu.ma/generate/episodes/${episodeId}/${filename}`;
+
   } catch (err) {
     console.error("❌ Subtitle generation failed:", err.message);
     await bot.editMessageText(`❌ Failed to generate ${lang} subtitle`, {
