@@ -286,6 +286,73 @@ async function generateSubtitle(chatId, episodeId, lang = "English") {
     return null;
   }
 }
+// -------------------- BOT COMMANDS --------------------
+
+// /start - show tutorial
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id;
+  const tutorial = `
+🎬 Welcome to Kiroflix Bot!
+
+To get a stream link for any anime:
+1️⃣ Send the anime title
+2️⃣ Include the episode number (e.g., "Episode 1")
+3️⃣ Optionally, include the subtitle language (e.g., "subtitle in French")
+
+The bot will reply with the <b>Watch Now</b> link to the embedded player.
+Enjoy! 🍿
+`;
+  await bot.sendMessage(chatId, tutorial, { parse_mode: "HTML" });
+});
+
+// /help - show instructions
+bot.onText(/\/help/, async (msg) => {
+  const chatId = msg.chat.id;
+  const helpMessage = `
+💡 Kiroflix Bot Commands:
+
+/start - Show this tutorial
+/help - Show instructions
+/latest - Show latest episodes with Watch Now links
+
+Send anime title and episode number to get the stream.
+Optionally include a subtitle language if needed.
+`;
+  await bot.sendMessage(chatId, helpMessage, { parse_mode: "HTML" });
+});
+
+// /latest - fetch and display latest episodes
+bot.onText(/\/latest/, async (msg) => {
+  const chatId = msg.chat.id;
+  await bot.sendMessage(chatId, "⏳ Fetching latest episodes...");
+
+  try {
+    const { data } = await axios.get("https://creators.kiroflix.site/backend/lastep.php");
+    const latestEpisodes = data?.results || [];
+
+    if (!latestEpisodes.length) {
+      await bot.sendMessage(chatId, "⚠️ No latest episodes found.");
+      return;
+    }
+
+    // Send each episode with Watch Now link
+    for (const ep of latestEpisodes) {
+      const stream = await generateStream(ep.episode_id);
+      if (!stream) continue;
+
+      const message = `
+🎬 <b>${ep.anime_title}</b>
+📺 Episode ${ep.latest_episode_number}: ${ep.episode_title}
+▶️ <a href="${stream.player}">Watch Now</a>
+`;
+      await bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+    }
+
+  } catch (err) {
+    logError("LATEST COMMAND", err);
+    await bot.sendMessage(chatId, "❌ Failed to fetch latest episodes.");
+  }
+});
 // -------------------- BOT --------------------
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
