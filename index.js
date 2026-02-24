@@ -322,6 +322,7 @@ Optionally include a subtitle language if needed.
 });
 
 // /latest - fetch and display latest episodes
+// /latest - fetch and display latest episodes
 bot.onText(/\/latest/, async (msg) => {
   const chatId = msg.chat.id;
   await bot.sendMessage(chatId, "⏳ Fetching latest episodes...");
@@ -335,18 +336,25 @@ bot.onText(/\/latest/, async (msg) => {
       return;
     }
 
-    // Send each episode with Watch Now link
-    for (const ep of latestEpisodes) {
-      const stream = await generateStream(ep.episode_id);
-      if (!stream) continue;
+    // Generate all streams in parallel
+    const streamPromises = latestEpisodes.map(ep => generateStream(ep.episode_id));
+    const streams = await Promise.all(streamPromises);
 
-      const message = `
-🎬 <b>${ep.anime_title}</b>
+    // Prepare one combined message
+    let message = "🎬 <b>Latest Episodes</b>:\n\n";
+
+    latestEpisodes.forEach((ep, i) => {
+      const stream = streams[i];
+      if (!stream) return; // skip if failed to generate
+
+      message += `
+<b>${ep.anime_title}</b>
 📺 Episode ${ep.latest_episode_number}: ${ep.episode_title}
 ▶️ <a href="${stream.player}">Watch Now</a>
-`;
-      await bot.sendMessage(chatId, message, { parse_mode: "HTML" });
-    }
+\n`;
+    });
+
+    await bot.sendMessage(chatId, message, { parse_mode: "HTML", disable_web_page_preview: true });
 
   } catch (err) {
     logError("LATEST COMMAND", err);
@@ -358,6 +366,9 @@ bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
   if (!text) return;
+
+  // ✅ Skip commands
+  if (text.startsWith("/")) return;
 
   try {
     logStep("NEW REQUEST", text);
@@ -378,7 +389,7 @@ bot.on("message", async (msg) => {
     }
 
     // 3️⃣ match
-const anime = await chooseBestAnime(intent, results);
+    const anime = await chooseBestAnime(intent, results);
 
     // 4️⃣ episodes
     const episodes = await getEpisodes(anime.id);
@@ -426,21 +437,22 @@ const anime = await chooseBestAnime(intent, results);
       episode: episode.number,
       player: stream.player
     });
+
     // Check if the user requested a subtitle
-if (intent.subtitle) {
-  const lang = intent.subtitleLang || "English";
+    if (intent.subtitle) {
+      const lang = intent.subtitleLang || "English";
 
-  // Check if subtitle already exists
-  const subs = await fetchAvailableSubtitles(episode.id);
-  const existing = subs.find(s => s.lang.toLowerCase() === lang.toLowerCase());
+      // Check if subtitle already exists
+      const subs = await fetchAvailableSubtitles(episode.id);
+      const existing = subs.find(s => s.lang.toLowerCase() === lang.toLowerCase());
 
-  if (existing) {
-    await bot.sendMessage(chatId, `🎯 Subtitle already available: ${existing.lang} - ${existing.file}`);
-  } else {
-    // Generate subtitle if not found
-    await generateSubtitle(chatId, episode.id, lang);
-  }
-}
+      if (existing) {
+        await bot.sendMessage(chatId, `🎯 Subtitle already available: ${existing.lang} - ${existing.file}`);
+      } else {
+        // Generate subtitle if not found
+        await generateSubtitle(chatId, episode.id, lang);
+      }
+    }
 
   } catch (err) {
     logError("MAIN BOT HANDLER", err);
