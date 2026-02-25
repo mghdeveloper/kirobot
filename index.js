@@ -68,7 +68,7 @@ GOAL:
    - If the anime is primarily known by a Japanese title (e.g., "Jigokuraku"), use that.
 3️⃣ Extract season/part (if any)
 4️⃣ Extract episode number
-5️⃣ Detect if subtitle is requested + language
+5️⃣ Detect if subtitle is requested + language (English,Frensh...)
 
 IMPORTANT RULES:
 - If you are NOT sure what anime it is → return {"notFound": true}
