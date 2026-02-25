@@ -420,6 +420,29 @@ bot.onText(/\/latest/, async (msg) => {
     await bot.sendMessage(chatId, "❌ Could not load latest episodes.");
   }
 });
+async function logUserUsage({
+  userId,
+  username,
+  message,
+  reply,
+  country = "Unknown"
+}) {
+  try {
+    await axios.post(
+      "https://creators.kiroflix.site/backend/log_usage.php",
+      {
+        user_id: userId,
+        username,
+        message,
+        reply,
+        country,
+        date: new Date().toISOString()
+      }
+    );
+  } catch (err) {
+    console.error("❌ Failed to log usage:", err.message);
+  }
+}
 // -------------------- BOT --------------------
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
@@ -428,6 +451,12 @@ bot.on("message", async (msg) => {
 
   // ✅ Skip commands
   if (text.startsWith("/")) return;
+
+  const userId = msg.from?.id;
+  const username =
+    msg.from?.username ||
+    `${msg.from?.first_name || ""} ${msg.from?.last_name || ""}`.trim();
+  const country = msg.from?.language_code || "Unknown";
 
   try {
     logStep("NEW REQUEST", text);
@@ -484,8 +513,7 @@ bot.on("message", async (msg) => {
     if (anime.poster) {
       await bot.sendPhoto(chatId, anime.poster, {
         caption,
-        parse_mode: "HTML",
-        disable_notification: false,
+        parse_mode: "HTML"
       });
     } else {
       await bot.sendMessage(chatId, caption, { parse_mode: "HTML" });
@@ -497,18 +525,28 @@ bot.on("message", async (msg) => {
       player: stream.player
     });
 
-    // Check if the user requested a subtitle
+    // ✅ Final reply text for logging
+    const finalReplyText = `${anime.title} - Episode ${episode.number} - ${stream.player}`;
+
+    // 🔥 LOG USAGE
+    await logUserUsage({
+      userId,
+      username,
+      message: text,
+      reply: finalReplyText,
+      country
+    });
+
+    // Check subtitle request
     if (intent.subtitle) {
       const lang = intent.subtitleLang || "English";
 
-      // Check if subtitle already exists
       const subs = await fetchAvailableSubtitles(episode.id);
       const existing = subs.find(s => s.lang.toLowerCase() === lang.toLowerCase());
 
       if (existing) {
         await bot.sendMessage(chatId, `🎯 Subtitle already available: ${existing.lang} - ${existing.file}`);
       } else {
-        // Generate subtitle if not found
         await generateSubtitle(chatId, episode.id, lang);
       }
     }
@@ -518,5 +556,4 @@ bot.on("message", async (msg) => {
     await bot.sendMessage(chatId, "⚠️ Something went wrong");
   }
 });
-
 console.log("🎬 Kiroflix Debug Bot Running");
