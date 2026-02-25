@@ -320,48 +320,32 @@ Optionally include a subtitle language if needed.
 `;
   await bot.sendMessage(chatId, helpMessage, { parse_mode: "HTML" });
 });
-
 const fs = require("fs");
 const path = require("path");
 
 const CACHE_FILE = path.join(__dirname, "latest_cache.json");
 const CACHE_DURATION = 3 * 60 * 60 * 1000; // 3 hours
 
-bot.onText(/\/latest/, async (msg) => {
-  const chatId = msg.chat.id;
-
+async function updateLatestCache() {
   try {
-    // ✅ Check cache first
-    if (fs.existsSync(CACHE_FILE)) {
-      const cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+    console.log("[CACHE] Updating latest episodes...");
 
-      if (Date.now() - cache.updatedAt < CACHE_DURATION) {
-        // Send cached stylish message
-        await bot.sendMessage(chatId, cache.message, {
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        });
-        return;
-      }
-    }
-
-    await bot.sendMessage(chatId, "⏳ Updating latest episodes...");
-
-    // ✅ Fetch latest episodes
     const { data } = await axios.get("https://creators.kiroflix.site/backend/lastep.php");
-    const latestEpisodes = data?.results || [];
+    let latestEpisodes = data?.results || [];
 
     if (!latestEpisodes.length) {
-      await bot.sendMessage(chatId, "⚠️ No latest episodes found.");
+      console.log("[CACHE] No episodes found");
       return;
     }
 
-    // ✅ Generate streams in parallel
+    // ✅ limit to 5 episodes max
+    latestEpisodes = latestEpisodes.slice(0, 5);
+
+    // ✅ generate streams in parallel
     const streams = await Promise.all(
       latestEpisodes.map(ep => generateStream(ep.episode_id))
     );
 
-    // ✅ Build stylish message
     let message = "🎬 <b>Latest Episodes</b>\n\n";
 
     latestEpisodes.forEach((ep, i) => {
@@ -376,7 +360,6 @@ bot.onText(/\/latest/, async (msg) => {
 `;
     });
 
-    // ✅ Save cache
     const cacheData = {
       updatedAt: Date.now(),
       message,
@@ -384,15 +367,36 @@ bot.onText(/\/latest/, async (msg) => {
 
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cacheData, null, 2));
 
-    // ✅ Send stylish message
-    await bot.sendMessage(chatId, message, {
+    console.log("[CACHE] Latest episodes updated");
+
+  } catch (err) {
+    logError("CACHE UPDATE", err);
+  }
+}
+// Run immediately when bot starts
+updateLatestCache();
+
+// Run every 3 hours automatically
+setInterval(updateLatestCache, CACHE_DURATION);
+bot.onText(/\/latest/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  try {
+    if (!fs.existsSync(CACHE_FILE)) {
+      await bot.sendMessage(chatId, "⏳ Latest episodes are being prepared, try again in a moment.");
+      return;
+    }
+
+    const cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+
+    await bot.sendMessage(chatId, cache.message, {
       parse_mode: "HTML",
       disable_web_page_preview: true,
     });
 
   } catch (err) {
     logError("LATEST COMMAND", err);
-    await bot.sendMessage(chatId, "❌ Failed to fetch latest episodes.");
+    await bot.sendMessage(chatId, "❌ Could not load latest episodes.");
   }
 });
 // -------------------- BOT --------------------
